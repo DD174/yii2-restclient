@@ -13,9 +13,7 @@ namespace apexwire\restclient;
 
 use yii\db\Expression;
 use yii\base\NotSupportedException;
-//use yii\db\QueryBuilder as BaseQueryBuilder;
 use yii\base\Object;
-use Yii;
 
 /**
  * Class QueryBuilder builds an HiActiveResource query based on the specification given as a [[Query]] object.
@@ -76,6 +74,8 @@ class QueryBuilder extends Object
      */
     public function build($query, $params = [])
     {
+        $query = $query->prepare($this);
+
         $this->buildSelect($query->select, $params);
         $this->buildPerPage($query->limit, $params);
         $this->buildPage($query->offset, $query->limit, $params);

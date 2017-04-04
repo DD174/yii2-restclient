@@ -18,6 +18,7 @@ use yii\base\Component;
 use yii\base\InvalidConfigException;
 use yii\helpers\Json;
 use Yii;
+use yii\helpers\ArrayHelper;
 
 /**
  * Class Connection
@@ -218,21 +219,68 @@ class Connection extends Component
      */
     public function makeRequest($method, $url, $query = [], $body = null, $raw = false)
     {
-        return $this->handleRequest($method, $this->prepareUrl($url, $query), $body, $raw);
+        return $this->handleRequest($method, $this->prepareUrl($url, $query, $body), $body, $raw);
     }
 
     /**
      * Creates URL.
      * @param mixed $path path
      * @param array $query query options
-     * @return array
+     * @param null|array $body
+     * @return string
      */
-    private function prepareUrl($path, array $query = [])
+    private function prepareUrl($path, array $query = [], $body = null)
     {
-        $url = $path;
+        //        $url = $path;
+        $url = $this->replaceAttributeInUrl($path, $query, $body);
         $query = array_merge($this->getAuth(), $query);
         if (!empty($query)) {
             $url .= (strpos($url, '?') === false ? '?' : '&') . http_build_query($query);
+        }
+
+        return $url;
+    }
+
+    /**
+     * Заменяем имя трибута в URL на его значение. В приоритете значения из $query
+     * `users/{user_id}/phones` -> `users/123/phones`
+     * @param string $url
+     * @param array $query
+     * @param null|array $body
+     * @return string
+     * @throws \Exception
+     */
+    private function replaceAttributeInUrl($url, array $query = [], $body = null)
+    {
+        $queryNew = [];
+        if (!empty($query)) {
+            array_walk($query, function($value, $key) use (&$queryNew) {
+                if (is_array($value)) {
+                    $queryNew = array_merge($queryNew, $value);
+                } else {
+                    $queryNew[preg_replace('#^.*\[|\].*$#', '', $key)] = $value;
+                }
+            });
+        }
+        if (!is_array($body)) {
+            $body = [];
+        }
+        $isError = false;
+        if (preg_match_all('/{(\w+)}/', $url, $matches) && isset($matches[1])) {
+            foreach ($matches[1] as $attribute) {
+                $value1 = ArrayHelper::getValue($queryNew, $attribute);
+                $value2 = ArrayHelper::getValue($body, $attribute);
+                if ($value1 !== null) {
+                    $url = str_replace('{' . $attribute . '}', $value1, $url);
+                } elseif ($value2 !== null) {
+                    $url = str_replace('{' . $attribute . '}', $value2, $url);
+                } else {
+                    $isError = true;
+                }
+            }
+            if ($isError) {
+                throw new \Exception('Not found attribute for url: ' . $url);
+            }
         }
 
         return $url;

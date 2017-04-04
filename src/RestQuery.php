@@ -11,11 +11,11 @@
 
 namespace apexwire\restclient;
 
+use hiqdev\hiart\ActiveQuery;
 use yii\base\InvalidConfigException;
 use yii\db\ActiveQueryInterface;
 use yii\db\ActiveQueryTrait;
 use yii\db\ActiveRelationTrait;
-use Yii;
 
 /**
  * Class RestQuery
@@ -172,5 +172,109 @@ class RestQuery extends Query implements ActiveQueryInterface
         }
 
         return null;
+    }
+
+    /**
+     * TODO: привести в порядок, лишнее убрать
+     * @inheritdoc
+     */
+    public function prepare($builder)
+    {
+        $query = $this;
+        if ($this->primaryModel === null) {
+            // eager loading
+            $query = $this;
+        } else {
+            // lazy loading of a relation
+            $where = $this->where;
+
+            if ($this->via instanceof self) {
+                // via junction table
+                $viaModels = $this->via->findJunctionRows([$this->primaryModel]);
+                $this->filterByModels($viaModels);
+            } elseif (is_array($this->via)) {
+                // via relation
+                /* @var $viaQuery ActiveQuery */
+                list($viaName, $viaQuery) = $this->via;
+                if ($viaQuery->multiple) {
+                    $viaModels = $viaQuery->all();
+                    $this->primaryModel->populateRelation($viaName, $viaModels);
+                } else {
+                    $model = $viaQuery->one();
+                    $this->primaryModel->populateRelation($viaName, $model);
+                    $viaModels = $model === null ? [] : [$model];
+                }
+                $this->filterByModels($viaModels);
+            } else {
+                $this->filterByModels([$this->primaryModel]);
+            }
+
+//            $query = Query::create($this);
+//            $this->where = $where;
+        }
+
+        if (!empty($this->on)) {
+            $query->andWhere($this->on);
+        }
+
+        return $query;
+    }
+
+    /**
+     * @param array $models
+     */
+    private function filterByModels($models)
+    {
+        $attributes = array_keys($this->link);
+
+        $attributes = $this->prefixKeyColumns($attributes);
+
+        $values = [];
+        if (count($attributes) === 1) {
+            // single key
+            $attribute = reset($this->link);
+            foreach ($models as $model) {
+                if (($value = $model[$attribute]) !== null) {
+                    if (is_array($value)) {
+                        $values = array_merge($values, $value);
+                    } else {
+                        $values[] = $value;
+                    }
+                }
+            }
+            if (empty($values)) {
+                $this->emulateExecution();
+            }
+        } else {
+            // composite keys
+
+            // ensure keys of $this->link are prefixed the same way as $attributes
+            $prefixedLink = array_combine(
+                $attributes,
+                array_values($this->link)
+            );
+            foreach ($models as $model) {
+                $v = [];
+                foreach ($prefixedLink as $attribute => $link) {
+                    $v[$attribute] = $model[$link];
+                }
+                $values[] = $v;
+                if (empty($v)) {
+                    $this->emulateExecution();
+                }
+            }
+        }
+
+        $values = array_unique($values, SORT_REGULAR);
+        foreach ($attributes as $attribute) {
+            foreach ($values as $value) {
+                if (!is_array($value)) {
+                    $this->andWhere([$attribute => $value]);
+                } elseif (isset($value[$attribute])) {
+                    $this->andWhere([$attribute => $value[$attribute]]);
+                }
+//                $this->andWhere(['in', $attributes, array_unique($values, SORT_REGULAR)]);
+            }
+        }
     }
 }
